@@ -1,0 +1,61 @@
+#!/usr/bin/env node
+"use strict";
+
+const cluster = require("cluster");
+
+if (!cluster.isMaster) {
+  const simulator = require("./simulator");
+
+  const acsUrl = process.env["ACS_URL"];
+  const dataModel = process.env["DATA_MODEL"];
+  const serialNumber = process.env["SERIAL_NUMBER"];
+
+  simulator.start(require(dataModel), serialNumber, acsUrl);
+  return;
+}
+
+const pkg = require("./package.json");
+
+function resolvePath(p) {
+  return require("path").resolve(process.cwd(), p);
+}
+
+const program = require("commander")
+  .version(pkg.version)
+  .description(pkg.description)
+  .option("-u, --acs-url [url]", "ACS URL to contact (default: http://127.0.0.1:7547/)", "http://127.0.0.1:7547/")
+  .option("-m, --data-model [filename]", "Data model template", resolvePath, "./data_model_202BC1-BM632w-8KA8WA1151100043.json")
+  .option("-p, --processes [count]", "Number of devices to simulate (default: 1)", parseFloat, 1)
+  .option("-w, --wait [milliseconds]", "Waiting period between process spawning (default: 1000)", parseFloat, 1000)
+  .option("-s, --serial [offset]", "Serial number offset (default: 0)", parseFloat, 0)
+  .parse(process.argv);
+
+if (!/^(http|https):\/\//.test(program.acsUrl)) {
+  console.error("Invalid ACS URL");
+  process.exit(1);
+}
+
+cluster.on("fork", function(worker) {
+  console.log(`Simulator ${worker.env["SERIAL_NUMBER"]} started`);
+});
+
+cluster.on("exit", function(worker, code, signal) {
+  console.log(`Simulator ${worker.env["SERIAL_NUMBER"]} died (${signal || code}). Restarting in 10 seconds...`)
+  setTimeout(function() {
+    let newWorker = cluster.fork(worker.env);
+    newWorker.env = worker.env;
+  }, 10000);
+});
+
+
+for (let i = 0; i < program.processes; ++ i) {
+  setTimeout(function() {
+    let env = {
+      "SERIAL_NUMBER": `00000${program.serial + i}`.slice(-6),
+      "ACS_URL": program.acsUrl,
+      "DATA_MODEL": program.dataModel,
+    };
+    let worker = cluster.fork(env);
+    worker.env = env;
+  }, i  * program.wait)
+}
