@@ -82,6 +82,13 @@ function inform(device, xmlOut, callback) {
 }
 
 
+const pending = [];
+
+function getPending() {
+  return pending.shift();
+}
+
+
 function getSortedPaths(device) {
   if (!device._sortedPaths)
     device._sortedPaths = Object.keys(device).filter(p => p[0] !== "_").sort();
@@ -208,9 +215,40 @@ function DeleteObject(device, xmlIn, xmlOut, callback) {
 }
 
 
+function Download(device, xmlIn, xmlOut, callback) {
+  const commandKey = xmlIn.get("/soap-env:Envelope/soap-env:Body/cwmp:Download/CommandKey", NAMESPACES).text();
+
+  const startTime = new Date();
+  pending.push(
+    function(xmlOut, callback) {
+      let requestNode = xmlOut.root().childNodes()[1].node("cwmp:TransferComplete");
+      requestNode.node("CommandKey", commandKey);
+      requestNode.node("StartTime", startTime.toISOString());
+      requestNode.node("CompleteTime", new Date().toISOString());
+      let fault = requestNode.node("FaultStruct");
+      fault.node("FaultCode").text("0");
+      fault.node("FaultString").text("");
+
+      callback(xmlOut, function(xml, callback) {
+        callback();
+      });
+    }
+  );
+
+  let responseNode = xmlOut.root().childNodes()[1].node("cwmp:DownloadResponse");
+  responseNode.node("Status", "1");
+  responseNode.node("StartTime", "0001-01-01T00:00:00Z");
+  responseNode.node("CompleteTime", "0001-01-01T00:00:00Z");
+
+  return callback(xmlOut);
+}
+
+
 exports.inform = inform;
+exports.getPending = getPending;
 exports.GetParameterNames = GetParameterNames;
 exports.GetParameterValues = GetParameterValues;
 exports.SetParameterValues = SetParameterValues;
 exports.AddObject = AddObject;
 exports.DeleteObject = DeleteObject;
+exports.Download = Download;

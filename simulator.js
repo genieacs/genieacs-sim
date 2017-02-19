@@ -96,7 +96,8 @@ function sendRequest(xml, callback) {
 
 
 function startSession() {
-  let xmlOut = createSoapDocument(0);
+  const requestId = Math.random().toString(36).slice(-8);
+  const xmlOut = createSoapDocument(requestId);
 
   let httpAgent = new http.Agent({
     keepAlive: true,
@@ -105,9 +106,7 @@ function startSession() {
 
   methods.inform(device, xmlOut, function(xml) {
     sendRequest(xml, function(xml) {
-      sendRequest(null, function(xml) {
-        handleMethod(xml);
-      });
+      cpeRequest();
     });
   });
 }
@@ -124,6 +123,26 @@ function createFaultResponse(xmlOut, code, message) {
   fault.node("FaultCode").text(code);
 
   return fault.node("FaultString").text(message);
+}
+
+
+function cpeRequest() {
+  const pending = methods.getPending();
+  if (!pending) {
+    sendRequest(null, function(xml) {
+      handleMethod(xml);
+    });
+    return;
+  }
+
+  const requestId = Math.random().toString(36).slice(-8);
+  const xmlOut = createSoapDocument(requestId);
+
+  pending(xmlOut, function(xml, callback) {
+    sendRequest(xml, function(xml) {
+      callback(xml, cpeRequest);
+    });
+  });
 }
 
 
