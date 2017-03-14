@@ -184,11 +184,20 @@ function AddObject(device, xmlIn, xmlOut, callback) {
   while (device[`${objectName}${instanceNumber}.`])
     instanceNumber += 1;
 
+  device[`${objectName}${instanceNumber}.`] = [true];
+
+  const defaultValues = {
+    "xsd:boolean": "false",
+    "xsd:int": "0",
+    "xsd:unsignedInt": "0",
+    "xsd:dateTime": "0001-01-01T00:00:00Z"
+  };
+
   for (let p of getSortedPaths(device)) {
     if (p.startsWith(objectName) && p.length > objectName.length) {
       let n = `${objectName}${instanceNumber}${p.slice(p.indexOf(".", objectName.length))}`;
       if (!device[n])
-        device[n] = [device[p][0], "", device[p][2]];
+        device[n] = [device[p][0], defaultValues[device[p][2]] || "", device[p][2]];
     }
   }
 
