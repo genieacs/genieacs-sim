@@ -99,11 +99,6 @@ function startSession() {
   const requestId = Math.random().toString(36).slice(-8);
   const xmlOut = createSoapDocument(requestId);
 
-  let httpAgent = new http.Agent({
-    keepAlive: true,
-    maxSockets: 1
-  });
-
   methods.inform(device, xmlOut, function(xml) {
     sendRequest(xml, function(xml) {
       cpeRequest();
