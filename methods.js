@@ -1,5 +1,9 @@
 "use strict";
 
+const http = require("http");
+const https = require("https");
+
+
 const NAMESPACES = {
   "soap-enc": "http://schemas.xmlsoap.org/soap/encoding/",
   "soap-env": "http://schemas.xmlsoap.org/soap/envelope/",
@@ -226,6 +230,45 @@ function DeleteObject(device, xmlIn, xmlOut, callback) {
 
 function Download(device, xmlIn, xmlOut, callback) {
   const commandKey = xmlIn.get("/soap-env:Envelope/soap-env:Body/cwmp:Download/CommandKey", NAMESPACES).text();
+  const url = xmlIn.get("/soap-env:Envelope/soap-env:Body/cwmp:Download/URL", NAMESPACES).text();
+
+  let faultCode = "9010";
+  let faultString = "Download timeout";
+
+  if (url.startsWith("http://")) {
+    http.get(url, (res) => {
+      res.on("end", () => {
+        if (res.statusCode === 200) {
+          faultCode = "0";
+          faultString = "";
+        }
+        else {
+          faultCode = "9016";
+          faultString = `Unexpected response ${res.statusCode}`;
+        }
+      });
+      res.resume();
+    }).on("error", (err) => {
+      faultString = err.message;
+    });
+  }
+  else if (url.startsWith("https://")) {
+    https.get(url, (res) => {
+      res.on("end", () => {
+        if (res.statusCode === 200) {
+          faultCode = "0";
+          faultString = "";
+        }
+        else {
+          faultCode = "9016";
+          faultString = `Unexpected response ${res.statusCode}`;
+        }
+      });
+      res.resume();
+    }).on("error", (err) => {
+      faultString = err.message;
+    });
+  }
 
   const startTime = new Date();
   pending.push(
@@ -235,8 +278,8 @@ function Download(device, xmlIn, xmlOut, callback) {
       requestNode.node("StartTime", startTime.toISOString());
       requestNode.node("CompleteTime", new Date().toISOString());
       let fault = requestNode.node("FaultStruct");
-      fault.node("FaultCode").text("0");
-      fault.node("FaultString").text("");
+      fault.node("FaultCode").text(faultCode);
+      fault.node("FaultString").text(faultString);
 
       callback(xmlOut, function(xml, callback) {
         callback();
