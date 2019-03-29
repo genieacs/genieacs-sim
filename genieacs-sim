@@ -9,8 +9,9 @@ if (!cluster.isMaster) {
   const acsUrl = process.env["ACS_URL"];
   const dataModel = process.env["DATA_MODEL"];
   const serialNumber = process.env["SERIAL_NUMBER"];
+  const listenerPort = parseInt(process.env["LISTENER_PORT"]);
 
-  simulator.start(require(dataModel), serialNumber, acsUrl);
+  simulator.start(require(dataModel), serialNumber, acsUrl, listenerPort);
   return;
 }
 
@@ -28,6 +29,7 @@ const program = require("commander")
   .option("-p, --processes [count]", "Number of devices to simulate (default: 1)", parseFloat, 1)
   .option("-w, --wait [milliseconds]", "Waiting period between process spawning (default: 1000)", parseFloat, 1000)
   .option("-s, --serial [offset]", "Serial number offset (default: 0)", parseFloat, 0)
+  .option("-l, --listener-port [port]", "Http listener port, for connection requests (default: 8030)", parseFloat, 8030)
   .parse(process.argv);
 
 if (!/^(http|https):\/\//.test(program.acsUrl)) {
@@ -54,6 +56,7 @@ for (let i = 0; i < program.processes; ++ i) {
       "SERIAL_NUMBER": `00000${program.serial + i}`.slice(-6),
       "ACS_URL": program.acsUrl,
       "DATA_MODEL": program.dataModel,
+      "LISTENER_PORT": `${parseInt(program.listenerPort) + i}`
     };
     let worker = cluster.fork(env);
     worker.env = env;

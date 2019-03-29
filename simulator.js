@@ -11,6 +11,8 @@ const NAMESPACES = {
   "cwmp": "urn:dslforum-org:cwmp-1-0"
 };
 
+let nextInformTimeout = null;
+let pendingInform = false;
 let http = null;
 let requestOptions = null;
 let device = null;
@@ -94,12 +96,13 @@ function sendRequest(xml, callback) {
   return request.end(body);
 }
 
-
-function startSession() {
+function startSession(event) {
+  nextInformTimeout = null;
+  pendingInform = false;
   const requestId = Math.random().toString(36).slice(-8);
   const xmlOut = createSoapDocument(requestId);
 
-  methods.inform(device, xmlOut, function(xml) {
+  methods.inform(device, xmlOut, event, function(xml) {
     sendRequest(xml, function(xml) {
       cpeRequest();
     });
@@ -150,9 +153,9 @@ function handleMethod(xml) {
     else if (device["InternetGatewayDevice.ManagementServer.PeriodicInformInterval"])
       informInterval = parseInt(device["InternetGatewayDevice.ManagementServer.PeriodicInformInterval"][1]);
 
-    setTimeout(function() {
+    nextInformTimeout = setTimeout(function() {
       startSession();
-    }, 1000 * informInterval);
+    }, pendingInform ? 0 : 1000 * informInterval);
 
     return;
   }
@@ -178,7 +181,25 @@ function handleMethod(xml) {
 }
 
 
-function start(dataModel, serialNumber, acsUrl) {
+function createHttpServer(serialNumber, ip, port, callback) {
+  const connectionRequestUrl = `http://${ip}:${port}/`;
+
+  const httpServer = http.createServer((_req, res) => {
+    connectionRequestInform();
+    console.log(`Simulator ${serialNumber}: Connection request;`);
+    res.end("");
+  });
+
+  httpServer.listen(port, err => {
+    if (err) return callback(err);
+    console.log(
+      `Simulator ${serialNumber} listening to ${connectionRequestUrl}`
+    );
+    return callback(null, connectionRequestUrl);
+  });
+}
+
+function start(dataModel, serialNumber, acsUrl, httpPort) {
   device = dataModel;
 
   if (device["Device.DeviceInfo.SerialNumber"])
@@ -190,8 +211,45 @@ function start(dataModel, serialNumber, acsUrl) {
   http = require(requestOptions.protocol.slice(0, -1));
   httpAgent = new http.Agent({keepAlive: true, maxSockets: 1});
 
-  startSession();
+  // start a dummy socket to get the used local ip
+  let socket = httpAgent.createConnection({});
+  socket.connect({
+    port: requestOptions.port,
+    host: requestOptions.hostname,
+    family: 4
+  }, () => {
+    const ip = socket.address().address;
+    socket.on("close", () => {
+      createHttpServer(
+        serialNumber,
+        ip,
+        httpPort,
+        (err, connectionRequestUrl) => {
+          if (err) throw err;
+          if (device["InternetGatewayDevice.ManagementServer.ConnectionRequestURL"]) {
+            device["InternetGatewayDevice.ManagementServer.ConnectionRequestURL"][1] = connectionRequestUrl;
+          } else if (device["Device.ManagementServer.ConnectionRequestURL"]) {
+            device["Device.ManagementServer.ConnectionRequestURL"][1] = connectionRequestUrl;
+          }
+
+          startSession();
+        }
+      );
+    });
+
+    socket.end();
+  });
 }
 
+function connectionRequestInform() {
+  // A session is ongoing when nextInformTimeout === null
+  if (nextInformTimeout === null) pendingInform = true;
+  else {
+    clearTimeout(nextInformTimeout);
+    nextInformTimeout = setTimeout(function () {
+      startSession("6 CONNECTION REQUEST");
+    }, 0);
+  }
+}
 
 exports.start = start;

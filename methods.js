@@ -32,7 +32,7 @@ const INFORM_PARAMS = [
 ];
 
 
-function inform(device, xmlOut, callback) {
+function inform(device, xmlOut, event, callback) {
   let body = xmlOut.root().childNodes()[1];
   let inform = body.node("cwmp:Inform");
   let deviceId = inform.node("DeviceId");
@@ -61,7 +61,7 @@ function inform(device, xmlOut, callback) {
     "soap-enc:arrayType": "cwmp:EventStruct[1]"
   }).node("EventStruct");
 
-  eventStruct.node("EventCode", "2 PERIODIC");
+  eventStruct.node("EventCode", event || "2 PERIODIC");
   eventStruct.node("CommandKey");
 
   inform.node("MaxEnvelopes", "1");
