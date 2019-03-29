@@ -1,5 +1,6 @@
 "use strict";
 
+const net = require("net");
 const libxmljs = require("libxmljs");
 const methods = require("./methods");
 
@@ -11,6 +12,8 @@ const NAMESPACES = {
   "cwmp": "urn:dslforum-org:cwmp-1-0"
 };
 
+let nextInformTimeout = null;
+let pendingInform = false;
 let http = null;
 let requestOptions = null;
 let device = null;
@@ -101,12 +104,13 @@ function sendRequest(xml, callback) {
   return request.end(body);
 }
 
-
-function startSession() {
+function startSession(event) {
+  nextInformTimeout = null;
+  pendingInform = false;
   const requestId = Math.random().toString(36).slice(-8);
   const xmlOut = createSoapDocument(requestId);
 
-  methods.inform(device, xmlOut, function(xml) {
+  methods.inform(device, xmlOut, event, function(xml) {
     sendRequest(xml, function(xml) {
       cpeRequest();
     });
@@ -157,9 +161,9 @@ function handleMethod(xml) {
     else if (device["InternetGatewayDevice.ManagementServer.PeriodicInformInterval"])
       informInterval = parseInt(device["InternetGatewayDevice.ManagementServer.PeriodicInformInterval"][1]);
 
-    setTimeout(function() {
+    nextInformTimeout = setTimeout(function() {
       startSession();
-    }, 1000 * informInterval);
+    }, pendingInform ? 0 : 1000 * informInterval);
 
     return;
   }
@@ -184,6 +188,45 @@ function handleMethod(xml) {
   });
 }
 
+function listenForConnectionRequests(serialNumber, acsUrlOptions, callback) {
+  let ip, port;
+  // Start a dummy socket to get the used local ip
+  let socket = net.createConnection({
+    port: acsUrlOptions.port,
+    host: acsUrlOptions.hostname,
+    family: 4
+  })
+  .on("error", callback)
+  .on("connect", () => {
+    ip = socket.address().address;
+    port = socket.address().port + 1;
+    socket.end();
+  })
+  .on("close", () => {
+    const connectionRequestUrl = `http://${ip}:${port}/`;
+
+    const httpServer = http.createServer((_req, res) => {
+      console.log(`Simulator ${serialNumber} got connection request`);
+      res.end();
+        // A session is ongoing when nextInformTimeout === null
+        if (nextInformTimeout === null) pendingInform = true;
+        else {
+          clearTimeout(nextInformTimeout);
+          nextInformTimeout = setTimeout(function () {
+            startSession("6 CONNECTION REQUEST");
+          }, 0);
+        }
+    });
+
+    httpServer.listen(port, ip, err => {
+      if (err) return callback(err);
+      console.log(
+        `Simulator ${serialNumber} listening for connection requests on ${connectionRequestUrl}`
+      );
+      return callback(null, connectionRequestUrl);
+    });
+  });
+}
 
 function start(dataModel, serialNumber, acsUrl) {
   device = dataModel;
@@ -209,8 +252,15 @@ function start(dataModel, serialNumber, acsUrl) {
   http = require(requestOptions.protocol.slice(0, -1));
   httpAgent = new http.Agent({keepAlive: true, maxSockets: 1});
 
-  startSession();
+  listenForConnectionRequests(serialNumber, requestOptions, (err, connectionRequestUrl) => {
+    if (err) throw err;
+    if (device["InternetGatewayDevice.ManagementServer.ConnectionRequestURL"]) {
+      device["InternetGatewayDevice.ManagementServer.ConnectionRequestURL"][1] = connectionRequestUrl;
+    } else if (device["Device.ManagementServer.ConnectionRequestURL"]) {
+      device["Device.ManagementServer.ConnectionRequestURL"][1] = connectionRequestUrl;
+    }
+    startSession();
+  });
 }
-
 
 exports.start = start;
