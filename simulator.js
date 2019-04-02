@@ -15,6 +15,7 @@ let http = null;
 let requestOptions = null;
 let device = null;
 let httpAgent = null;
+let basicAuth;
 
 
 function createSoapDocument(id) {
@@ -35,7 +36,6 @@ function createSoapDocument(id) {
   return xml;
 }
 
-
 function sendRequest(xml, callback) {
   let headers = {};
   let body = "";
@@ -45,6 +45,7 @@ function sendRequest(xml, callback) {
 
   headers["Content-Length"] = body.length;
   headers["Content-Type"] = "text/xml; charset=\"utf-8\"";
+  headers["Authorization"]= basicAuth;
 
   if (device._cookie)
     headers["Cookie"] = device._cookie;
@@ -74,6 +75,12 @@ function sendRequest(xml, callback) {
         chunk.copy(body, offset, 0, chunk.length);
         return offset += chunk.length;
       });
+
+      if (Math.floor(response.statusCode / 100) !== 2) {
+        throw new Error(
+          `Unexpected response Code ${response.statusCode}: ${body}`
+        );
+      }
 
       if (+response.headers["Content-Length"] > 0 || body.length > 0)
         xml = libxmljs.parseXml(body);
@@ -185,6 +192,18 @@ function start(dataModel, serialNumber, acsUrl) {
     device["Device.DeviceInfo.SerialNumber"][1] = serialNumber;
   else if (device["InternetGatewayDevice.DeviceInfo.SerialNumber"])
     device["InternetGatewayDevice.DeviceInfo.SerialNumber"][1] = serialNumber;
+
+  let username = "";
+  let password = "";
+  if (device["Device.ManagementServer.Username"]) {
+    username = device["Device.ManagementServer.Username"][1];
+    password = device["Device.ManagementServer.Password"][1];
+  } else if (device["InternetGatewayDevice.ManagementServer.Username"]) {
+    username = device["InternetGatewayDevice.ManagementServer.Username"][1];
+    password = device["InternetGatewayDevice.ManagementServer.Password"][1];
+  }
+
+  basicAuth = "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
 
   requestOptions = require("url").parse(acsUrl);
   http = require(requestOptions.protocol.slice(0, -1));
