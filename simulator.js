@@ -69,7 +69,7 @@ function sendRequest(xml, callback) {
 
     return response.on("end", function() {
       let offset = 0;
-      body = new Buffer(bytes);
+      body = Buffer.allocUnsafe(bytes);
 
       chunks.forEach(function(chunk) {
         chunk.copy(body, offset, 0, chunk.length);
