@@ -208,14 +208,14 @@ function listenForConnectionRequests(serialNumber, acsUrlOptions, callback) {
     const httpServer = http.createServer((_req, res) => {
       console.log(`Simulator ${serialNumber} got connection request`);
       res.end();
-        // A session is ongoing when nextInformTimeout === null
-        if (nextInformTimeout === null) pendingInform = true;
-        else {
-          clearTimeout(nextInformTimeout);
-          nextInformTimeout = setTimeout(function () {
-            startSession("6 CONNECTION REQUEST");
-          }, 0);
-        }
+      // A session is ongoing when nextInformTimeout === null
+      if (nextInformTimeout === null) pendingInform = true;
+      else {
+        clearTimeout(nextInformTimeout);
+        nextInformTimeout = setTimeout(function () {
+          startSession("6 CONNECTION REQUEST");
+        }, 0);
+      }
     });
 
     httpServer.listen(port, ip, err => {
