@@ -1,6 +1,7 @@
 "use strict";
 
 const net = require("net");
+const crypto = require("crypto");
 const libxmljs = require("libxmljs");
 const methods = require("./methods");
 
@@ -18,6 +19,8 @@ let http = null;
 let requestOptions = null;
 let device = null;
 let httpAgent = null;
+let authUsername = "";
+let authPassword = "";
 let basicAuth;
 
 
@@ -39,6 +42,109 @@ function createSoapDocument(id) {
   return xml;
 }
 
+
+function digest(
+  username,
+  password,
+  uri,
+  httpMethod,
+  body,
+  authHeader
+) {
+  const cnonce = "0a4f113b";
+  const nc = "00000001";
+  let qop;
+
+  if (authHeader.qop) {
+    if (authHeader.qop.indexOf(",") !== -1) qop = "auth";
+    // Either auth or auth-int, prefer auth
+    else qop = authHeader.qop;
+  }
+
+  const ha1 = crypto.createHash("md5");
+  ha1
+    .update(username)
+    .update(":")
+    .update(authHeader.realm)
+    .update(":")
+    .update(password);
+  // TODO support "MD5-sess" algorithm directive
+  const ha1d = ha1.digest("hex");
+
+  const ha2 = crypto.createHash("md5");
+  ha2
+    .update(httpMethod)
+    .update(":")
+    .update(uri);
+
+  if (qop === "auth-int") {
+    const b = crypto.createHash("md5").update(body || "").digest("hex");
+    ha2.update(":").update(b);
+  }
+
+  const ha2d = ha2.digest("hex");
+
+  const hash = crypto.createHash("md5");
+  hash
+    .update(ha1d)
+    .update(":")
+    .update(authHeader.nonce);
+  if (qop) {
+    hash
+      .update(":")
+      .update(nc)
+      .update(":")
+      .update(cnonce)
+      .update(":")
+      .update(qop);
+  }
+  hash.update(":").update(ha2d);
+
+  let authString = `Digest username="${username}"`;
+  authString += `,realm="${authHeader.realm}"`;
+  authString += `,nonce="${authHeader.nonce}"`;
+  authString += `,uri="${uri}"`;
+  if (authHeader.algorithm) authString += `,algorithm=${authHeader.algorithm}`;
+  if (qop) authString += `,qop=${qop},nc=${nc},cnonce="${cnonce}"`;
+  authString += `,response="${hash.digest("hex")}"`;
+  if (authHeader.opaque) authString += `,opaque="${authHeader.opaque}"`;
+
+  return authString;
+}
+
+function parseWwwAuthenticateHeader(authHeader) {
+  authHeader = authHeader.trim();
+  const method = authHeader.split(" ", 1)[0];
+  const res = { method: method };
+  const parts = authHeader.slice(method.length + 1).split(",");
+
+  let part;
+  while ((part = parts.shift()) != null) {
+    const name = part.split("=", 1)[0];
+    if (name.length === part.length)
+      throw new Error("Unable to parse auth header");
+
+    let value = part.slice(name.length + 1);
+    if (!/^\s*"/.test(value)) {
+      value = value.trim();
+    } else {
+      while (!/[^\\]"\s*$/.test(value)) {
+        const p = parts.shift();
+        if (p == null) throw new Error("Unable to parse auth header");
+        value += "," + p;
+      }
+
+      try {
+        value = JSON.parse(value);
+      } catch (error) {
+        throw new Error("Unable to parse auth header");
+      }
+    }
+    res[name.trim()] = value;
+  }
+  return res;
+}
+
 function sendRequest(xml, callback) {
   let headers = {};
   let body = "";
@@ -48,65 +154,104 @@ function sendRequest(xml, callback) {
 
   headers["Content-Length"] = body.length;
   headers["Content-Type"] = "text/xml; charset=\"utf-8\"";
-  headers["Authorization"]= basicAuth;
 
-  if (device._cookie)
-    headers["Cookie"] = device._cookie;
+  const recursive = (authString) => {
+    if (authString) headers["Authorization"] = authString;
 
-  let options = {
-    method: "POST",
-    headers: headers,
-    agent: httpAgent
-  };
+    if (device._cookie)
+      headers["Cookie"] = device._cookie;
 
-  Object.assign(options, requestOptions);
+    let options = {
+      method: "POST",
+      headers: headers,
+      agent: httpAgent
+    };
 
-  let request = http.request(options, function(response) {
-    let chunks = [];
-    let bytes = 0;
+    Object.assign(options, requestOptions);
 
-    response.on("data", function(chunk) {
-      chunks.push(chunk);
-      return bytes += chunk.length;
-    });
+    let request = http.request(options, function(response) {
+      let chunks = [];
+      let bytes = 0;
 
-    return response.on("end", function() {
-      let offset = 0;
-      body = Buffer.allocUnsafe(bytes);
-
-      chunks.forEach(function(chunk) {
-        chunk.copy(body, offset, 0, chunk.length);
-        return offset += chunk.length;
+      response.on("data", function(chunk) {
+        chunks.push(chunk);
+        return bytes += chunk.length;
       });
 
-      if (Math.floor(response.statusCode / 100) !== 2) {
-        throw new Error(
-          `Unexpected response Code ${response.statusCode}: ${body}`
-        );
-      }
+      return response.on("end", function() {
+        let offset = 0;
+        const _body = Buffer.allocUnsafe(bytes);
 
-      if (+response.headers["Content-Length"] > 0 || body.length > 0)
-        xml = libxmljs.parseXml(body);
-      else
-        xml = null;
+        chunks.forEach(function(chunk) {
+          chunk.copy(_body, offset, 0, chunk.length);
+          return offset += chunk.length;
+        });
 
-      if (response.headers["set-cookie"])
-        device._cookie = response.headers["set-cookie"];
+        if (response.statusCode === 401) {
+          if (response.headers["www-authenticate"]) {
+            const authHeader = parseWwwAuthenticateHeader(
+              response.headers["www-authenticate"]
+            );
 
-      return callback(xml);
+            // ACS requested different authenticaion method 
+            if (!authString || !authString.starsWith(authHeader.method)) {
+              if (authHeader.method === "Basic") {
+                recursive(basicAuth);
+              } else if (authHeader.method === "Digest") {
+                const digestAuth = digest(
+                  authUsername,
+                  authPassword,
+                  options.path,
+                  "POST",
+                  body,
+                  authHeader
+                );
+
+                recursive(digestAuth);
+              } else {
+                throw new Error(`Unrecognized authenticate method ${authHeader.method}`);
+              }
+
+              return;
+            }
+          }
+
+          throw new Error("CPE authenticaion failed!");
+        }
+
+        if (Math.floor(response.statusCode / 100) !== 2) {
+          throw new Error(
+            `Unexpected response Code ${response.statusCode}: ${_body}`
+          );
+        }
+
+        if (+response.headers["Content-Length"] > 0 || _body.length > 0)
+          xml = libxmljs.parseXml(_body);
+        else
+          xml = null;
+
+        if (response.headers["set-cookie"])
+          device._cookie = response.headers["set-cookie"];
+
+        return callback(xml);
+      });
     });
-  });
 
-  request.setTimeout(30000, function(err) {
-    throw new Error("Socket timed out");
-  });
+    request.setTimeout(30000, function(err) {
+      throw new Error("Socket timed out");
+    });
 
-  return request.end(body);
+    request.end(body);
+  }
+
+  if (requestOptions.protocol === "https") recursive(basicAuth);
+  else recursive();
 }
 
 function startSession(event) {
   nextInformTimeout = null;
   pendingInform = false;
+  delete device._cookie;
   const requestId = Math.random().toString(36).slice(-8);
   const xmlOut = createSoapDocument(requestId);
 
@@ -236,17 +381,15 @@ function start(dataModel, serialNumber, acsUrl) {
   else if (device["InternetGatewayDevice.DeviceInfo.SerialNumber"])
     device["InternetGatewayDevice.DeviceInfo.SerialNumber"][1] = serialNumber;
 
-  let username = "";
-  let password = "";
   if (device["Device.ManagementServer.Username"]) {
-    username = device["Device.ManagementServer.Username"][1];
-    password = device["Device.ManagementServer.Password"][1];
+    authUsername = device["Device.ManagementServer.Username"][1];
+    authPassword = device["Device.ManagementServer.Password"][1];
   } else if (device["InternetGatewayDevice.ManagementServer.Username"]) {
-    username = device["InternetGatewayDevice.ManagementServer.Username"][1];
-    password = device["InternetGatewayDevice.ManagementServer.Password"][1];
+    authUsername = device["InternetGatewayDevice.ManagementServer.Username"][1];
+    authPassword = device["InternetGatewayDevice.ManagementServer.Password"][1];
   }
 
-  basicAuth = "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
+  basicAuth = "Basic " + Buffer.from(`${authUsername}:${authPassword}`).toString("base64");
 
   requestOptions = require("url").parse(acsUrl);
   http = require(requestOptions.protocol.slice(0, -1));
