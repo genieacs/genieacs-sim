@@ -1,7 +1,8 @@
 "use strict";
 
 const net = require("net");
-const libxmljs = require("libxmljs");
+const xmlParser = require("./xml-parser");
+const xmlUtils = require("./xml-utils");
 const methods = require("./methods");
 
 const NAMESPACES = {
@@ -21,30 +22,26 @@ let httpAgent = null;
 let basicAuth;
 
 
-function createSoapDocument(id) {
-  let xml = libxmljs.Document();
-  let env = xml.node("soap-env:Envelope");
+function createSoapDocument(id, body) {
+  let headerNode = xmlUtils.node(
+    "soap-env:Header",
+    {},
+    xmlUtils.node("cwmp:ID", { "soap-env:mustUnderstand": 1 }, xmlParser.encodeEntities(id))
+  );
 
+  let bodyNode = xmlUtils.node("soap-env:Body", {}, body);
+  let namespaces = {};
   for (let prefix in NAMESPACES)
-    env.defineNamespace(prefix, NAMESPACES[prefix]);
+    namespaces[`xmlns:${prefix}`] = NAMESPACES[prefix];
+  
+  let env = xmlUtils.node("soap-env:Envelope", namespaces, [headerNode, bodyNode]);
 
-  let header = env.node("soap-env:Header");
-
-  header.node("cwmp:ID").attr({
-    "soap-env:mustUnderstand": 1
-  }).text(id);
-
-  env.node("soap-env:Body");
-
-  return xml;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n${env}`;
 }
 
 function sendRequest(xml, callback) {
   let headers = {};
-  let body = "";
-
-  if (xml)
-    body = xml.toString();
+  let body = xml || "";
 
   headers["Content-Length"] = body.length;
   headers["Content-Type"] = "text/xml; charset=\"utf-8\"";
@@ -86,7 +83,7 @@ function sendRequest(xml, callback) {
       }
 
       if (+response.headers["Content-Length"] > 0 || body.length > 0)
-        xml = libxmljs.parseXml(body);
+        xml = xmlParser.parseXml(body.toString());
       else
         xml = null;
 
@@ -108,9 +105,9 @@ function startSession(event) {
   nextInformTimeout = null;
   pendingInform = false;
   const requestId = Math.random().toString(36).slice(-8);
-  const xmlOut = createSoapDocument(requestId);
 
-  methods.inform(device, xmlOut, event, function(xml) {
+  methods.inform(device, event, function(body) {
+    let xml = createSoapDocument(requestId, body);
     sendRequest(xml, function(xml) {
       cpeRequest();
     });
@@ -118,17 +115,23 @@ function startSession(event) {
 }
 
 
-function createFaultResponse(xmlOut, code, message) {
-  let body = xmlOut.root().childNodes()[1];
+function createFaultResponse(code, message) {
+  let fault = xmlUtils.node(
+    "detail",
+    {},
+    xmlUtils.node("cwmp:Fault", {}, [
+      xmlUtils.node("FaultCode", {}, code),
+      xmlUtils.node("FaultString", {}, xmlParser.encodeEntities(message))
+    ])
+  );
 
-  let soapFault = body.node("soap-env:Fault");
-  soapFault.node("faultcode").text("Client");
-  soapFault.node("faultstring").text("CWMP fault");
+  let soapFault = xmlUtils.node("soap-env:Fault", {}, [
+    xmlUtils.node("faultcode", {}, "Client"),
+    xmlUtils.node("faultstring", {}, "CWMP fault"),
+    fault
+  ]);
 
-  let fault = soapFault.node("detail").node("cwmp:Fault");
-  fault.node("FaultCode").text(code);
-
-  return fault.node("FaultString").text(message);
+  return soapFault;
 }
 
 
@@ -142,9 +145,9 @@ function cpeRequest() {
   }
 
   const requestId = Math.random().toString(36).slice(-8);
-  const xmlOut = createSoapDocument(requestId);
 
-  pending(xmlOut, function(xml, callback) {
+  pending(function(body, callback) {
+    let xml = createSoapDocument(requestId, body);
     sendRequest(xml, function(xml) {
       callback(xml, cpeRequest);
     });
@@ -168,20 +171,47 @@ function handleMethod(xml) {
     return;
   }
 
-  let requestId = xml.get("/soap-env:Envelope/soap-env:Header/cwmp:ID", NAMESPACES).text();
-  let xmlOut = createSoapDocument(requestId);
-  let element = xml.get("/soap-env:Envelope/soap-env:Body/cwmp:*", NAMESPACES);
-  let method = methods[element.name()];
+  let headerElement, bodyElement;
+  let envelope = xml.children[0];
+  for (const c of envelope.children) {
+    switch (c.localName) {
+      case "Header":
+        headerElement = c;
+        break;
+      case "Body":
+        bodyElement = c;
+        break;
+    }
+  }
+
+  let requestId;
+  for (let c of headerElement.children) {
+    if (c.localName === "ID") {
+      requestId = xmlParser.decodeEntities(c.text);
+      break;
+    }
+  }
+
+  let requestElement;
+  for (let c of bodyElement.children) {
+    if (c.name.startsWith("cwmp:")) {
+      requestElement = c;
+      break;
+    }
+  }
+  let method = methods[requestElement.localName];
 
   if (!method) {
-    createFaultResponse(xmlOut, 9000, "Method not supported");
-    sendRequest(xmlOut, function(xml) {
+    let body = createFaultResponse(9000, "Method not supported");
+    let xml = createSoapDocument(requestId, body);
+    sendRequest(xml, function(xml) {
       handleMethod(xml);
     });
     return;
   }
 
-  methods[element.name()](device, xml, xmlOut, function(xml) {
+  method(device, requestElement, function(body) {
+    let xml = createSoapDocument(requestId, body);
     sendRequest(xml, function(xml) {
       handleMethod(xml);
     });
