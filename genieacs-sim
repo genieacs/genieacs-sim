@@ -5,12 +5,47 @@ const cluster = require("cluster");
 
 if (!cluster.isMaster) {
   const simulator = require("./simulator");
+  const csvParser = require("./csv-parser");
+  const fs = require("fs");
+  const path = require("path");
 
   const acsUrl = process.env["ACS_URL"];
   const dataModel = process.env["DATA_MODEL"];
   const serialNumber = process.env["SERIAL_NUMBER"];
 
-  simulator.start(require(dataModel), serialNumber, acsUrl);
+  let device;
+  const data = fs.readFileSync(dataModel);
+  if (path.parse(dataModel).ext.toLowerCase() === '.csv') {
+    const rows = csvParser.reduce(csvParser.parseCsv(data.toString()));
+    device = {};
+    for (const row of rows) {
+      const isObject = row["Object"] === "true";
+      let id = row["Parameter"];
+      if (isObject) id += ".";
+
+      if (
+        id.startsWith("DeviceID.") ||
+        id.startsWith("Downloads.") ||
+        id.startsWith("Tags.") ||
+        id.startsWith("Events.") ||
+        id.startsWith("Reboot") ||
+        id.startsWith("FactoryReset") ||
+        id.startsWith("VirtalParameters.")
+      )
+        continue;
+
+      device[id] = [row["Writable"] === "true"];
+      if (!isObject) {
+        device[id].push(row["Value"] || "");
+        if (row["Value type"] != null) device[id].push(row["Value type"]);
+      }
+    }
+  }
+  else {
+    device = JSON.parse(data);
+  }
+
+  simulator.start(device, serialNumber, acsUrl);
   return;
 }
 
