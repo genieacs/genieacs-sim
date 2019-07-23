@@ -261,9 +261,11 @@ function listenForConnectionRequests(serialNumber, acsUrlOptions, callback) {
 function start(dataModel, serialNumber, acsUrl) {
   device = dataModel;
 
+  if (device["DeviceID.SerialNumber"])
+    device["DeviceID.SerialNumber"][1] = serialNumber;
   if (device["Device.DeviceInfo.SerialNumber"])
     device["Device.DeviceInfo.SerialNumber"][1] = serialNumber;
-  else if (device["InternetGatewayDevice.DeviceInfo.SerialNumber"])
+  if (device["InternetGatewayDevice.DeviceInfo.SerialNumber"])
     device["InternetGatewayDevice.DeviceInfo.SerialNumber"][1] = serialNumber;
 
   let username = "";

@@ -5,12 +5,36 @@ const cluster = require("cluster");
 
 if (!cluster.isMaster) {
   const simulator = require("./simulator");
+  const csvParser = require("./csv-parser");
+  const fs = require("fs");
+  const path = require("path");
 
   const acsUrl = process.env["ACS_URL"];
   const dataModel = process.env["DATA_MODEL"];
   const serialNumber = process.env["SERIAL_NUMBER"];
 
-  simulator.start(require(dataModel), serialNumber, acsUrl);
+  let device;
+  const data = fs.readFileSync(dataModel);
+  if (path.parse(dataModel).ext.toLowerCase() === '.csv') {
+    const rows = csvParser.reduce(csvParser.parseCsv(data.toString()));
+    device = {};
+    for (const row of rows) {
+      const isObject = row["Object"] === "true";
+      let id = row["Parameter"];
+      if (isObject) id += ".";
+
+      device[id] = [row["Writable"] === "true"];
+      if (!isObject) {
+        device[id].push(row["Value"] || "");
+        if (row["Value type"] != null) device[id].push(row["Value type"]);
+      }
+    }
+  }
+  else {
+    device = JSON.parse(data);
+  }
+
+  simulator.start(device, serialNumber, acsUrl);
   return;
 }
 
@@ -24,7 +48,7 @@ const program = require("commander")
   .version(pkg.version)
   .description(pkg.description)
   .option("-u, --acs-url [url]", "ACS URL to contact (default: http://127.0.0.1:7547/)", "http://127.0.0.1:7547/")
-  .option("-m, --data-model [filename]", "Data model template", resolvePath, "./data_model_202BC1-BM632w-8KA8WA1151100043.json")
+  .option("-m, --data-model [filename]", "Data model template", resolvePath, "./data_model_202BC1-BM632w-8KA8WA1151100043.csv")
   .option("-p, --processes [count]", "Number of devices to simulate (default: 1)", parseFloat, 1)
   .option("-w, --wait [milliseconds]", "Waiting period between process spawning (default: 1000)", parseFloat, 1000)
   .option("-s, --serial [offset]", "Serial number offset (default: 0)", parseFloat, 0)

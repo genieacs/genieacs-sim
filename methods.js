@@ -27,7 +27,14 @@ const INFORM_PARAMS = [
 
 function inform(device, event, callback) {
   let manufacturer = "";
-  if (device["Device.DeviceInfo.Manufacturer"]) {
+  if (device["DeviceID.Manufacturer"]) {
+    manufacturer = xmlUtils.node(
+      "Manufacturer",
+      {},
+      xmlParser.encodeEntities(device["DeviceID.Manufacturer"][1])
+    );
+  }
+  else if (device["Device.DeviceInfo.Manufacturer"]) {
     manufacturer = xmlUtils.node(
       "Manufacturer",
       {}, 
@@ -42,7 +49,14 @@ function inform(device, event, callback) {
   }
 
   let oui = "";
-  if (device["Device.DeviceInfo.ManufacturerOUI"]) {
+  if (device["DeviceID.OUI"]) {
+    oui = xmlUtils.node(
+      "OUI",
+      {},
+      xmlParser.encodeEntities(device["DeviceID.OUI"][1])
+    );
+  }
+  else if (device["Device.DeviceInfo.ManufacturerOUI"]) {
     oui = xmlUtils.node(
       "OUI",
       {},
@@ -57,7 +71,13 @@ function inform(device, event, callback) {
   }
 
   let productClass = "";
-  if (device["Device.DeviceInfo.ProductClass"]) {
+  if (device["DeviceID.ProductClass"]) {
+    productClass = xmlUtils.node(
+      "ProductClass",
+      {},
+      xmlParser.encodeEntities(device["DeviceID.ProductClass"][1])
+    );
+  } else if (device["Device.DeviceInfo.ProductClass"]) {
     productClass = xmlUtils.node(
       "ProductClass",
       {},
@@ -72,12 +92,18 @@ function inform(device, event, callback) {
   }
 
   let serialNumber = "";
-  if (device["Device.DeviceInfo.SerialNumber"]) {
+  if (device["DeviceID.SerialNumber"]) {
+    serialNumber = xmlUtils.node(
+      "SerialNumber",
+      {},
+      xmlParser.encodeEntities(device["DeviceID.SerialNumber"][1])
+    );
+  } else if (device["Device.DeviceInfo.SerialNumber"]) {
     serialNumber = xmlUtils.node(
       "SerialNumber",
       {},
       xmlParser.encodeEntities(device["Device.DeviceInfo.SerialNumber"][1])
-    );
+      );
   } else if (device["InternetGatewayDevice.DeviceInfo.SerialNumber"]) {
     serialNumber = xmlUtils.node(
       "SerialNumber",
@@ -138,8 +164,9 @@ function getPending() {
 
 
 function getSortedPaths(device) {
-  if (!device._sortedPaths)
-    device._sortedPaths = Object.keys(device).filter(p => p[0] !== "_").sort();
+  if (device._sortedPaths) return device._sortedPaths;
+  const ignore = new Set(["DeviceID", "Downloads", "Tags", "Events", "Reboot", "FactoryReset", "VirtalParameters"]);
+  device._sortedPaths = Object.keys(device).filter(p => p[0] !== "_" && !ignore.has(p.split(".")[0])).sort();
   return device._sortedPaths;
 }
 
