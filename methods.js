@@ -9,7 +9,7 @@ const NAMESPACES = {
   "soap-env": "http://schemas.xmlsoap.org/soap/envelope/",
   "xsd": "http://www.w3.org/2001/XMLSchema",
   "xsi": "http://www.w3.org/2001/XMLSchema-instance",
-  "cwmp": "urn:dslforum-org:cwmp-1-0"
+  "cwmp": "urn:dslforum-org:cwmp-1-2"
 };
 
 const INFORM_PARAMS = [
@@ -149,13 +149,15 @@ function GetParameterValues(device, xmlIn, xmlOut, callback) {
 
   for (let p of parameterNames) {
     let name = p.text();
-    let value = device[name][1];
-    let type = device[name][2];
-    let valueStruct = parameterList.node("ParameterValueStruct");
-    valueStruct.node("Name", name);
-    valueStruct.node("Value", device[name][1]).attr({
-      "xsi:type": type
-    });
+    if(device[name]){
+      let value = device[name][1];
+      let type = device[name][2];
+      let valueStruct = parameterList.node("ParameterValueStruct");
+      valueStruct.node("Name", name);
+      valueStruct.node("Value", device[name][1]).attr({
+        "xsi:type": type
+      });
+    }
   }
 
   return callback(xmlOut);

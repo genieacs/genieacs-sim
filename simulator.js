@@ -9,7 +9,7 @@ const NAMESPACES = {
   "soap-env": "http://schemas.xmlsoap.org/soap/envelope/",
   "xsd": "http://www.w3.org/2001/XMLSchema",
   "xsi": "http://www.w3.org/2001/XMLSchema-instance",
-  "cwmp": "urn:dslforum-org:cwmp-1-0"
+  "cwmp": "urn:dslforum-org:cwmp-1-2"
 };
 
 let nextInformTimeout = null;
