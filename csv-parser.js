@@ -1,7 +1,6 @@
 /* CSV Parser - written by Jacob Rowe-Lane.  Huge inspiration credit to Zaid Abdulla and the genieacs-sim project */
 
 "use strict";
-const fs = require("fs");
 
 const CHAR_DOUBLE_QUOTE = 34; // Char code for double quotes
 const CHAR_CR = 13; // Carriage return
