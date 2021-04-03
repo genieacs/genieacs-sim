@@ -1,95 +1,110 @@
+/* CSV Parser - written by Jacob Rowe-Lane.  Huge inspiration credit to Zaid Abdulla and the genieacs-sim project */
+
 "use strict";
 
-const CHAR_DOUBLE_QUOTE = 34;
-const CHAR_CR = 13;
-const CHAR_LF = 10;
-const CHAR_COMMA = 44;
+const CHAR_DOUBLE_QUOTE = 34; // Char code for double quotes
+const CHAR_CR = 13; // Carriage return
+const CHAR_LF = 10; // Line feed
+const CHAR_COMMA = 44; // Comma
 
-// https://tools.ietf.org/html/rfc4180#section-2
-function parseCsv(data) {
-  const rows = [];
-  let row = [];
-  let field = "";
-  let escapedState = false;
-  let i = 0;
+/* Based off https://tools.ietf.org/html/rfc4180#section-2 standard.  Again, credit to Zaid Abdulla */
+function parseCSVFromString(data) {
+	const lines = []; // All "rows" in the CSV
+	let row = []; // Individual row, ephermeral
+	let field = ""; // Element of row
 
-  function addField() {
-    row.push(field);
-    field = "";
-  }
+	let escapedQuote = false; // Toggle on double quotes
+	let i = 0; // Global iterator
+	let l = 0; // Line iterator
+	let c = 0; //Character iterator
 
-  function addRow() {
-    rows.push(row);
-    row = [];
-    // Ignore empty lines
-    while ([CHAR_LF, CHAR_CR].includes(data.charCodeAt(i + 1))) i++;
-  }
+	function addFieldToRow() {
+		row.push(field); // Push field into row
+		field = ""; // Reset field
+		c = 0; // Reset character iterator
+	}
 
-  data = data.trim() + "\n";
+	function addRow() {
+		lines.push(row); // Add row to lines
+		row = []; // Reset row
+		l++; // Iterate line (error messages)
+		while ([CHAR_LF, CHAR_CR].includes(data.charCodeAt(i + 1))) i++; // If next character is CR or LF, ignore and increment i
+	}
 
-  for (i; i < data.length; i++) {
-    const char = data.charAt(i);
-    switch (data.charCodeAt(i)) {
-      case CHAR_DOUBLE_QUOTE:
-        if (!escapedState) {
-          // quoted field started
-          if (field.length) throw new Error("Invalid CSV format");
-          escapedState = true;
-        } else {
-          const nextChar = data.charCodeAt(i + 1);
-          if (nextChar === CHAR_DOUBLE_QUOTE) {
-            field += char;
-            i++;
-          } else if (nextChar && ![CHAR_COMMA, CHAR_CR, CHAR_LF].includes(nextChar)) {
-            throw new Error("Invalid CSV format");
-          } else {
-            // quoted field ended
-            escapedState = false;
-          }
-        }
-        break;
+	data = data.trim() + "\n"; // Remove whitespace, add newline to the end
 
-      case CHAR_COMMA:
-        if (!escapedState) addField();
-        else field += char;
-        break;
+	for (i; i < data.length; i++) {  // Iterate through all characters
+		const current_char = data.charAt(i);  //Select character of iterator
+		c++;  // Iterate character counter
+		switch(data.charCodeAt(i)) {  // Switch on current character
+			case CHAR_DOUBLE_QUOTE:  // Double quote
+      if (!escapedQuote) {
+        if (field.length) {
+            console.log(lines);
+						throw new Error ("Invalid CSV formatting: Double Quote bad placement @ row: " + l + ", character: " + c); // Double quotes can only appear inside a field if enclosed inside double quotes
+					}
+					escapedQuote = true;  //  Flip to escaped
+			}
+			else {
+				const nextChar = data.charCodeAt(i + 1);
+				if (nextChar === CHAR_DOUBLE_QUOTE) {  // Double quotes must be escaped with prior double quotes
+					field += current_char;
+					i++; // Additional iteration to avoid errors or double quoting
+					/* Variation from Zaid's code - whilst CR, LF, Commas and DQs must only appear inside an escaped field if they wish to be represented, any other character is allowed to
+					co-exist hence further checking is not necessary */
+				} else {
+					escapedQuote = false;  // Flip to normal
+				}
+			}
+			break;
+
+			case CHAR_COMMA: // Usually signifies new field
+				if(!escapedQuote) { //  If not inside a quote then push field to row
+          addFieldToRow();
+        } else field += current_char;  //  Otherwise it exists inside an escaped quote and should be interpreted literally
+				break;
 
       case CHAR_CR:
+        if(escapedQuote){
+					field += current_char; //  Variation from Zaid - fields can contain CR characters if in escaped state according to RFC
+				}
+				break;
+
       case CHAR_LF:
-        if (!escapedState) {
-          addField();
-          addRow();
-        }
-        else {
-          field += char;
-        }
-        break;
+				if(!escapedQuote){  //  Signifies end of line, add field to row and push row to line
+					addFieldToRow();
+					addRow();
+				} else field += current_char;  //  In escaped state, treat as literal
+				break;
 
       default:
-        field += char;
-        break;
+				field += current_char;  //  No special character, treat as literal
+				break;
     }
   }
 
-  if (escapedState) throw new Error("Invalid CSV format");
-  return rows;
+  if(escapedQuote) {
+      throw new Error("Invalid CSV: Finished parsing, left hanging escaped state");
+    }
+    return lines;
 }
 
-function reduce(rows, headerFirstRow = true) {
-  if (headerFirstRow) {
-    const headers = rows.shift();
-    return rows.map(row => {
-      let obj = {};
-      for (let i = 0; i < headers.length; i++)
-        obj[headers[i]] = row[i];
-      return obj;
-    });
+function reduceParsed(parsedCSV, headers = true) {  // Maps every entry to a header category
+	if (headers) {
+		const headersArray = parsedCSV.shift();  // If first line is a header line (as indicated by headers boolean), shift first value of array parsedCSV into headersArray
+		return parsedCSV.map(item => { // Map function - takes "item" as the current element being processed and passes it into arrow function
+			let retObj = {}; // Declare object, K V array
+			for (let i = 0; i < headersArray.length; i++) { // headersArray is a nested array.  Each "i" represents an entire field, not a character
+				retObj[headersArray[i]] = item[i]; // item is also a nested array, this sets the key of retObj to the header value at position "i" in the local loop and assigns it to the value at item position "i"
+    }
+			return retObj; // Return
+		});
   } else {
-    return rows.map(row => {
-      return Object.assign({}, row);
-    });
+			return parsedCSV.map(item => { // Similar to above, but headerArray doesn't exist.  No iterator required as mapping an array to an object has default behavior of mapping every array item numerically, e.g.  zero'th entry has key of 0 and value of array at position 0
+				return Object.assign({}, item);
+			});
   }
 }
 
-exports.parseCsv = parseCsv;
-exports.reduce = reduce;
+exports.parseCsv = parseCSVFromString;
+exports.reduce = reduceParsed; // Exports both functions to be called externally
