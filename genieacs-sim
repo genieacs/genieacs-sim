@@ -64,13 +64,20 @@ cluster.on("fork", function(worker) {
 });
 
 cluster.on("exit", function(worker, code, signal) {
-  console.log(`Simulator ${worker.env["SERIAL_NUMBER"]} died (${signal || code}). Restarting in 10 seconds...`)
-  setTimeout(function() {
-    let newWorker = cluster.fork(worker.env);
-    newWorker.env = worker.env;
-  }, 10000);
+  if(code == 255){
+    console.log(`Simulator ${worker.env["SERIAL_NUMBER"]} - Factory Reset - Restarting`);
+    setTimeout(function() {
+      let newWorker = cluster.fork(worker.env);
+      newWorker.env = worker.env;
+    }, 1000);
+  }else{
+    console.log(`Simulator ${worker.env["SERIAL_NUMBER"]} died (${signal || code}). Restarting in 10 seconds... ${signal} and ${code}`);
+    setTimeout(function() {
+      let newWorker = cluster.fork(worker.env);
+      newWorker.env = worker.env;
+      }, 10000);
+  };
 });
-
 
 for (let i = 0; i < program.processes; ++ i) {
   setTimeout(function() {

@@ -200,6 +200,7 @@ function handleMethod(xml) {
     }
   }
   let method = methods[requestElement.localName];
+  
 
   if (!method) {
     let body = createFaultResponse(9000, "Method not supported");
@@ -210,12 +211,30 @@ function handleMethod(xml) {
     return;
   }
 
-  method(device, requestElement, function(body) {
+  let nextStep=method(device, requestElement, function(body) {
     let xml = createSoapDocument(requestId, body);
     sendRequest(xml, function(xml) {
       handleMethod(xml);
     });
   });
+  if(nextStep === "boot"){
+    return startSession("1 BOOT,M Reboot");
+    
+    methods.inform(device, "1 BOOT, M Reboot", function(body) {
+    requestId = Math.random().toString(36).slice(-8);
+    let xml = createSoapDocument(requestId, body);
+    sendRequest(xml, function(xml) {
+      handleMethod(xml);
+    });
+    })
+  }
+  else if(nextStep == "reset"){
+    //device = JSON.parse(JSON.stringify(methods.getDeviceTemplate()))
+    //console.log(device);
+    setTimeout(function(){process.exit(255)
+    },0);
+    //return startSession("0 BOOTSTRAP,1 BOOT");
+  }
 }
 
 function listenForConnectionRequests(serialNumber, acsUrlOptions, callback) {
@@ -260,7 +279,7 @@ function listenForConnectionRequests(serialNumber, acsUrlOptions, callback) {
 
 function start(dataModel, serialNumber, acsUrl) {
   device = dataModel;
-
+  methods.setDeviceTemplate(device);
   if (device["DeviceID.SerialNumber"])
     device["DeviceID.SerialNumber"][1] = serialNumber;
   if (device["Device.DeviceInfo.SerialNumber"])
@@ -291,7 +310,7 @@ function start(dataModel, serialNumber, acsUrl) {
     } else if (device["Device.ManagementServer.ConnectionRequestURL"]) {
       device["Device.ManagementServer.ConnectionRequestURL"][1] = connectionRequestUrl;
     }
-    startSession();
+    startSession("0 BOOTSTRAP,1 BOOT");
   });
 }
 
