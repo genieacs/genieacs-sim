@@ -24,6 +24,11 @@ const INFORM_PARAMS = [
   "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress"
 ];
 
+var deviceTemplate = null;
+
+function setDeviceTemplate(device){
+  deviceTemplate = JSON.parse(JSON.stringify(device));
+}
 
 function inform(device, event, callback) {
   let manufacturer = "";
@@ -123,9 +128,21 @@ function inform(device, event, callback) {
     ]
   );
 
-  let evnt = xmlUtils.node("Event", {
-    "soap-enc:arrayType": "cwmp:EventStruct[1]"
-  }, eventStruct);
+  let strEvent = (event || "2 PERIODIC").split(",");
+  let events = [];
+
+  for(let p of strEvent){
+    let evt = p.replace(/^\s+|\s+$/gm,'');
+    if(evt === "") {
+      continue;
+    }
+    events.push(xmlUtils.node("EventStruct",{},[
+      xmlUtils.node("EventCode", {}, evt),
+      xmlUtils.node("CommandKey")]
+      )
+    );
+  } 
+  let evnt = xmlUtils.node("Event", {"soap-enc:arrayType": `cwmp:EventStruct[${events.length}]`}, events);
 
   let params = [];
   for (let p of INFORM_PARAMS) {
@@ -172,6 +189,7 @@ function getSortedPaths(device) {
 
 
 function GetParameterNames(device, request, callback) {
+  //console.log(device);
   let parameterNames = getSortedPaths(device);
 
   let parameterPath, nextLevel;
@@ -229,6 +247,7 @@ function GetParameterNames(device, request, callback) {
 
 function GetParameterValues(device, request, callback) {
   let parameterNames = request.children[0].children;
+
 
   let params = []
   for (let p of parameterNames) {
@@ -298,18 +317,21 @@ function AddObject(device, request, callback) {
     "xsd:dateTime": "0001-01-01T00:00:00Z"
   };
 
-  for (let p of getSortedPaths(device)) {
+  getSortedPaths(device);
+  for (let p of getSortedPaths(deviceTemplate)) {
     if (p.startsWith(objectName) && p.length > objectName.length) {
       let n = `${objectName}${instanceNumber}${p.slice(p.indexOf(".", objectName.length))}`;
       if (!device[n])
-        device[n] = [device[p][0], defaultValues[device[p][2]] || "", device[p][2]];
+        device[n] = [deviceTemplate[p][0], defaultValues[deviceTemplate[p][2]] || "", deviceTemplate[p][2]];
     }
   }
+
 
   let response = xmlUtils.node("cwmp:AddObjectResponse", {}, [
     xmlUtils.node("InstanceNumber", {}, String(instanceNumber)),
     xmlUtils.node("Status", {}, "0")
   ]);
+  delete deviceTemplate._sortedPaths;
   delete device._sortedPaths;
   return callback(response);
 }
@@ -409,7 +431,24 @@ function Download(device, request, callback) {
   return callback(response);
 }
 
+function Reboot(device, request, callback) {
+  let response = xmlUtils.node("cwmp:RebootResponse", {}, "");
+  callback(response);
+  return "inform";
+}
 
+
+function FactoryReset(device, request, callback) {
+  let response = xmlUtils.node("cwmp:FactoryResetResponse", {}, "");
+  callback(response);
+  return "reset";
+}
+
+function getDeviceTemplate(){
+  return deviceTemplate;
+}
+
+exports.setDeviceTemplate = setDeviceTemplate;
 exports.inform = inform;
 exports.getPending = getPending;
 exports.GetParameterNames = GetParameterNames;
@@ -418,3 +457,6 @@ exports.SetParameterValues = SetParameterValues;
 exports.AddObject = AddObject;
 exports.DeleteObject = DeleteObject;
 exports.Download = Download;
+exports.Reboot = Reboot;
+exports.FactoryReset = FactoryReset;
+exports.getDeviceTemplate = getDeviceTemplate;
