@@ -281,6 +281,27 @@ function start(dataModel, serialNumber, acsUrl) {
   basicAuth = "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
 
   requestOptions = require("url").parse(acsUrl);
+  if (requestOptions.port === null) {
+    switch (requestOptions.protocol) {
+      case "http:":
+        requestOptions.port = 80;
+        break;
+      case "https:":
+        requestOptions.port = 443;
+        break;
+      case "ftp:":
+        requestOptions.port = 21;
+        break;
+      case "ws:":
+        requestOptions.port = 80;
+        break;
+      case "wss:":
+        requestOptions.port = 443;
+        break;
+      default:
+        break;
+    }
+  }
   http = require(requestOptions.protocol.slice(0, -1));
   httpAgent = new http.Agent({keepAlive: true, maxSockets: 1});
 
